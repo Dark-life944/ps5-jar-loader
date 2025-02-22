@@ -248,6 +248,16 @@
                     <artifactId>debugsettings</artifactId>
                     <version>${project.parent.version}</version>
                 </dependency>
+                <dependency>
+                    <groupId>org.ps5jb.xploit</groupId>
+                    <artifactId>jailbreak</artifactId>
+                    <version>${project.parent.version}</version>
+                </dependency>
+                <dependency>
+                    <groupId>org.ps5jb.xploit</groupId>
+                    <artifactId>elfloader</artifactId>
+                    <version>${project.parent.version}</version>
+                </dependency>
             </dependencies>
         </profile>
     </profiles>
