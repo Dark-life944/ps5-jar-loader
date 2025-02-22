@@ -114,7 +114,7 @@ public class Pointer extends AbstractPointer {
      * @return The native address of the given object
      *   suitable for creating a {@link Pointer} instance.
      */
-    protected static long addrOf(Object object) {
+    public static long addrOf(Object object) {
         Object[] val = new Object[] { object };
         long result = UNSAFE.getLong(val, Unsafe.ARRAY_OBJECT_BASE_OFFSET);
         val[0] = null;
