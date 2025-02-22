@@ -396,6 +396,24 @@ public class KernelAccessorIPv6 implements KernelAccessor {
         return kernelBaseAddr;
     }
 
+    public long getKernelDataBase() {
+        final KernelOffsets kernelOffsets = new KernelOffsets(libKernel.getSystemSoftwareVersion());
+        return kernelBaseAddr + kernelOffsets.OFFSET_KERNEL_DATA;
+    }
+
+
+    public int getPipeReadFd() {
+        return this.pipe_fd[0];
+    }
+
+    public int getPipeWriteFd() {
+        return this.pipe_fd[1];
+    }
+
+    public KernelPointer getPipeAddr() {
+        return this.pipe_addr;
+    }
+
     private void readObject(ObjectInputStream stream) throws IOException, ClassNotFoundException {
         stream.defaultReadObject();
 

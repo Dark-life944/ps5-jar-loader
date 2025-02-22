@@ -77,6 +77,10 @@ public class LibKernel extends Library {
     private Pointer sceKernelSpawn;
     private Pointer sceKernelGetModuleList;
     private Pointer sceKernelGetModuleInfo;
+    // Elfloader
+    private Pointer jitshm_create;
+    private Pointer jitshm_alias;
+    private Pointer pthread_create;
 
     /**
      * Constructor.
@@ -723,5 +727,29 @@ public class LibKernel extends Library {
         }
 
         return (int) call(sceKernelGetModuleInfo, handle, result.addr());
+    }
+
+    public int pthread_create(Pointer thread, Pointer func, Pointer args) {
+        if (pthread_create == null) {
+            pthread_create = addrOf("pthread_create");
+        }
+
+        return (int) call(pthread_create, thread.addr(), Pointer.NULL.addr(), func.addr(), args.addr());
+    }
+
+    public long jitshm_create(long start, long stop, long flags) {
+        if (jitshm_create == null) {
+            jitshm_create = addrOf("jitshm_create");
+        }
+
+        return (long) call(jitshm_create, start, stop, flags);
+    }
+
+    public int jitshm_alias(long handle, int flags) {
+        if (jitshm_alias == null) {
+            jitshm_alias = addrOf("jitshm_alias");
+        }
+
+        return (int) call(jitshm_alias, handle, flags);
     }
 }
