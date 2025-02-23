@@ -118,7 +118,7 @@ public class Library {
      * @return Value returned by the native call.
      * @see CallContext#execute(Pointer, long...)
      */
-    protected long call(Pointer function, long ... args) {
+    public long call(Pointer function, long ... args) {
         if (this.callContext == null) {
             this.callContext = new CallContext();
         }
