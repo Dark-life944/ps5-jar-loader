@@ -161,7 +161,7 @@ public class Elfloader implements Runnable {
                 }
             }
 
-            // load bdj-launch.elf from usb root
+            // load bdj.elf from usb root
             File elfFile = null;
             for(int i = 0; i < 8; i++) {
                 try {
