@@ -409,7 +409,9 @@ public class Elfloader implements Runnable {
                 int p_type = phdr_addr.inc(OFF_PHDR_TYPE).read4();
 
                 if(p_type == PT_LOAD) {
+                    Status.println("pt_load started...");
                     pt_load(elf_addr, base_addr, phdr_addr);
+                    Status.println("pt_load finished.");
                 }
             }
             Status.println("Program headers parsed");
@@ -476,6 +478,7 @@ public class Elfloader implements Runnable {
                 args[5] = 0;
                 Status.println("Invoking entry point...");
                 libKernel.call(base_addr.inc(e_entry), args);
+                Status.println("Loaded elf finished.");
             } else {
                 throw new IOException("Invalid ELF file");
             }
