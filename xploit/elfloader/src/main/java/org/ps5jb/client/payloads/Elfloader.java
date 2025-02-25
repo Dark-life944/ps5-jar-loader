@@ -262,7 +262,7 @@ public class Elfloader implements Runnable {
         }
 
         if(p_filesz > 0) {
-            addr.copyTo(elf_addr.inc(p_offset), 0, (int)p_filesz);
+            elf_addr.inc(p_offset).copyTo(addr, 0, (int)p_filesz);
         }
     }
 
