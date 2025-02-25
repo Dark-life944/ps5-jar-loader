@@ -101,7 +101,7 @@ public class Elfloader implements Runnable {
 
             try {
                 arg_addr.inc(0x18).write8(kernelAccessor.getPipeAddr().addr());
-                arg_addr.inc(0x20).write8(sdk.KERNEL_BASE_ADDRESS);
+                arg_addr.inc(0x20).write8(sdk.kernelBaseAddress);
             } catch (Throwable t) {
                 arg_addr.inc(0x18).write8(0);
                 arg_addr.inc(0x20).write8(0);
@@ -131,8 +131,8 @@ public class Elfloader implements Runnable {
                 cpuSet.setCurrentThreadCore(1);
                 Status.println("Pinned to single CPU");
 
-                KernelPointer kbase = KernelPointer.valueOf(sdk.KERNEL_BASE_ADDRESS, false);
-                KernelOffsets o = sdk.KERNEL_OFFSETS;
+                KernelPointer kbase = KernelPointer.valueOf(sdk.kernelBaseAddress, false);
+                KernelOffsets o = sdk.kernelOffsets;
                 qaFlags = kbase.inc(o.OFFSET_KERNEL_DATA + o.OFFSET_KERNEL_DATA_BASE_QA_FLAGS);
                 secFlags = kbase.inc(o.OFFSET_KERNEL_DATA + o.OFFSET_KERNEL_DATA_BASE_SECURITY_FLAGS);
                 utokenFlags = kbase.inc(o.OFFSET_KERNEL_DATA + o.OFFSET_KERNEL_DATA_BASE_UTOKEN_FLAGS);
@@ -262,7 +262,7 @@ public class Elfloader implements Runnable {
         }
 
         if(p_filesz > 0) {
-            addr.write(elf_addr.inc(p_offset).read((int)p_filesz));
+            addr.copyTo(elf_addr.inc(p_offset), 0, (int)p_filesz);
         }
     }
 
@@ -284,7 +284,7 @@ public class Elfloader implements Runnable {
         int shm_fd = -1;
 
         // Backup data
-        data.write(addr.read((int)memsz));
+        addr.copyTo(data, 0, (int)memsz);
 
         try {
             // Create shm with executable permissions.
