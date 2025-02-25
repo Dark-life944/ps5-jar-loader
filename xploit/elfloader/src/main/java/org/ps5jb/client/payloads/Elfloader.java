@@ -1,14 +1,12 @@
 package org.ps5jb.client.payloads;
 
 import org.ps5jb.client.utils.init.SdkInit;
-import org.ps5jb.loader.Config;
 import org.ps5jb.loader.KernelReadWrite;
 import org.ps5jb.loader.Status;
 import org.ps5jb.sdk.core.Pointer;
 import org.ps5jb.sdk.core.kernel.KernelAccessorIPv6;
 import org.ps5jb.sdk.core.kernel.KernelOffsets;
 import org.ps5jb.sdk.core.kernel.KernelPointer;
-import org.ps5jb.sdk.include.sys.CpuSet;
 import org.ps5jb.sdk.lib.LibKernel;
 
 import java.io.*;
@@ -118,6 +116,8 @@ public class Elfloader implements Runnable {
          this.sdk = null;
         final FileInputStream fileInputStream;
         try {
+            File elfFile = null;
+
             try {
                 sdk = SdkInit.init(true, true);
                 int uid = libKernel.getuid();
@@ -126,10 +126,19 @@ public class Elfloader implements Runnable {
                     return;
                 }
 
-                // Pin to a single CPU
-                CpuSet cpuSet = new CpuSet(libKernel);
-                cpuSet.setCurrentThreadCore(1);
-                Status.println("Pinned to single CPU");
+                // load bdj.elf from usb root
+                for(int i = 0; i < 8; i++) {
+                    try {
+                        File f = new File("/mnt/usb" + i + "/bdj.elf");
+                        if (f.exists()) {
+                            elfFile = f;
+                            Status.println("Found bdj.elf on usb" + i);
+                            break;
+                        }
+                    } catch (Exception ex) {
+                        Status.println("Error searching for bdj.elf on usb" + i);
+                    }
+                }
 
                 KernelPointer kbase = KernelPointer.valueOf(sdk.kernelBaseAddress, false);
                 KernelOffsets o = sdk.kernelOffsets;
@@ -161,20 +170,6 @@ public class Elfloader implements Runnable {
                 }
             }
 
-            // load bdj.elf from usb root
-            File elfFile = null;
-            for(int i = 0; i < 8; i++) {
-                try {
-                    File f = new File("/mnt/usb" + i + "/bdj.elf");
-                    if (f.exists()) {
-                        elfFile = f;
-                        Status.println("Found bdj.elf on usb" + i);
-                        break;
-                    }
-                } catch (Exception ex) {
-                    Status.println("Error searching for bdj.elf on usb" + i);
-                }
-            }
             if (elfFile == null) {
                 Status.println("No bdj.elf found!");
                 return;
@@ -184,10 +179,33 @@ public class Elfloader implements Runnable {
             int read = new FileInputStream(elfFile).read(this.elfData);
             Status.println("# bytes of bdj.elf: " + read);
 
+            File procDumpBeforeSetup = new File(elfFile.getParentFile(), "before_setup.procdump");
+            if (procDumpBeforeSetup.exists()) {
+                procDumpBeforeSetup.delete();
+            }
+            Status.println("Dumping current process to " + procDumpBeforeSetup.getAbsolutePath());
+            DumpCurProcUtil.dumpCurProcToFile(procDumpBeforeSetup, libKernel, sdk);
+
             // try to init and run elf
             init();
+
+            File procDumpAfterSetup = new File(elfFile.getParentFile(), "after_setup.procdump");
+            if (procDumpAfterSetup.exists()) {
+                procDumpAfterSetup.delete();
+            }
+            Status.println("Dumping current process to " + procDumpAfterSetup.getAbsolutePath());
+            DumpCurProcUtil.dumpCurProcToFile(procDumpAfterSetup, libKernel, sdk);
+
             Status.println("Init of elfloader successful! Trying to run elf...");
             runElf(this.elfData);
+
+            File procDumpPostRun = new File(elfFile.getParentFile(), "post_run.procdump");
+            if (procDumpPostRun.exists()) {
+                procDumpPostRun.delete();
+            }
+            Status.println("Dumping current process to " + procDumpPostRun.getAbsolutePath());
+            DumpCurProcUtil.dumpCurProcToFile(procDumpPostRun, libKernel, sdk);
+
         } catch (Exception e) {
             throw new RuntimeException(e);
         } finally {

@@ -45,7 +45,7 @@ public class MemoryBuffer {
     }
 
     public void dump() {
-        MemoryDumper.dump(this.ptr, getSize(), true);
+        MemoryDumper.dump(this.ptr, getSize(), true, null);
     }
 
     public void snapshot() {

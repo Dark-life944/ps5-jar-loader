@@ -3,6 +3,9 @@ package org.ps5jb.client.utils.memory;
 import org.ps5jb.loader.Status;
 import org.ps5jb.sdk.core.AbstractPointer;
 
+import java.io.IOException;
+import java.io.OutputStreamWriter;
+
 /**
  * Utility class to dump memory in hexadecimal format.
  */
@@ -15,7 +18,7 @@ public class MemoryDumper {
      * @param relative If true, printed offsets will start at 0.
      *   If false, offsets will show actual memory address.
      */
-    public static void dump(AbstractPointer buf, long size, boolean relative) {
+    public static void dump(AbstractPointer buf, long size, boolean relative, OutputStreamWriter outputStreamWriter) {
         StringBuffer sb = new StringBuffer(110);
         for (int j = 0; j < size; j += 0x10) {
             sb.append(AbstractPointer.toString(relative ? j : buf.addr() + j));
@@ -53,7 +56,16 @@ public class MemoryDumper {
                 }
             }
 
-            Status.println(sb.toString());
+            if (outputStreamWriter != null) {
+                try {
+                    outputStreamWriter.write(sb + "\n");
+                } catch (IOException e) {
+                    Status.println("print-error: " + sb);
+                }
+            } else {
+                Status.println(sb.toString());
+            }
+
             sb.setLength(0);
         }
     }
