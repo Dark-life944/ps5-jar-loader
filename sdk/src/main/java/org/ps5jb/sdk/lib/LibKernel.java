@@ -83,8 +83,7 @@ public class LibKernel extends Library {
     // Elfloader
     private Pointer jitCreateSharedMemory;
     private Pointer jitCreateAliasOfSharedMemory;
-    private Pointer jitCreateSharedMemory;
-    private Pointer jitCreateAliasOfSharedMemory;
+    private Pointer ptrace;
 
     /**
      * Constructor.
@@ -763,27 +762,6 @@ public class LibKernel extends Library {
 
         return (int) call(sceKernelJitMapSharedMemory, fd, prot, result.addr());
     }
-
-    public int jitCreateSharedMemory(long name, long size, int prot, long dest) {
-        if (jitCreateSharedMemory == null) {
-            jitCreateSharedMemory = addrOf("sceKernelJitCreateSharedMemory");
-        }
-
-        return (int) call(jitCreateSharedMemory, name, size, prot, dest);
-    }
-
-    public int jitCreateAliasOfSharedMemory(int fd, int prot, long dest) {
-        if (jitCreateAliasOfSharedMemory == null) {
-            jitCreateAliasOfSharedMemory = addrOf("sceKernelJitCreateAliasOfSharedMemory");
-        }
-
-        return (int) call(jitCreateAliasOfSharedMemory, fd, prot, dest );
-    }
-
-    public int pthread_create(Pointer thread, Pointer func, Pointer args) {
-        if (pthread_create == null) {
-            pthread_create = addrOf("pthread_create");
-        }
 
     public int jitCreateSharedMemory(long name, long size, int prot, long dest) {
         if (jitCreateSharedMemory == null) {
