@@ -669,38 +669,22 @@ public class Elfloader implements Runnable {
 
     private void loadLibrary(String libraryName) throws Exception {
         Status.println("Attempting to load library: " + libraryName);
-        String libraryPath = "/system/common/lib/" + libraryName + ".sprx";
+        // Avoid adding .sprx again if the library name already contains it
+        String libraryPath;
+        if (libraryName.endsWith(".sprx")) {
+            libraryPath = "/system/common/lib/" + libraryName;
+        } else {
+            libraryPath = "/system/common/lib/" + libraryName + ".sprx";
+        }
         File libraryFile = new File(libraryPath);
         if (!libraryFile.exists()) {
             Status.println("Library file not found at: " + libraryPath);
             throw new Exception("Library not found: " + libraryName);
         }
-
         Status.println("Loading library from path: " + libraryPath);
         Library lib = new Library(libraryPath); // Load the library using Library constructor
         loadedLibraries.put(libraryName, lib); // Store the library instance
         Status.println("Library loaded successfully, handle: " + lib.getHandle());
-
-        // Optional: Resolve common symbols if needed
-        try {
-            // List of dynamic symbols to resolve (based on .dynsym)
-            String[] requiredSymbols = {
-                "getpid", "perror", "kill", "waitpid", "strlen", "sysctl", "malloc", "free",
-                "strcmp", "munmap", "memcpy", "strcpy", "strcat", "strerror", "memset",
-                "vsnprintf", "sceKernelSendNotificationRequest"
-            };
-            for (int i = 0; i < requiredSymbols.length; i++) {
-                String symbol = requiredSymbols[i];
-                try {
-                    Pointer symbolAddr = lib.addrOf(symbol);
-                    Status.println("Resolved symbol '" + symbol + "' at address: " + symbolAddr.addr());
-                } catch (Exception e) {
-                    Status.println("Failed to resolve symbol '" + symbol + "': " + e.getMessage() + ", continuing...");
-                }
-            }
-        } catch (Exception e) {
-            Status.println("Symbol resolution failed: " + e.getMessage() + ", continuing without it");
-        }
     }
 
     private void resolveDynamicSymbols(Pointer base_addr) throws Exception {
