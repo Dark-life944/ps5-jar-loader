@@ -11,8 +11,10 @@ import org.ps5jb.sdk.core.kernel.KernelPointer;
 import org.ps5jb.sdk.lib.LibKernel;
 
 import java.io.*;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 
 public class Elfloader implements Runnable {
@@ -497,6 +499,7 @@ public class Elfloader implements Runnable {
                 Pointer dyn = dynamic_section_addr;
                 long strtab_addr = 0; // Address of .dynstr
                 long strtab_size = 0; // Size of .dynstr
+                List neededOffsets = new ArrayList(); // Store DT_NEEDED offsets temporarily
                 Map neededLibraries = new HashMap(); // Store all required libraries
 
                 // Parse dynamic section to find DT_STRTAB, DT_STRSZ, and DT_NEEDED
@@ -512,17 +515,27 @@ public class Elfloader implements Runnable {
                         strtab_size = d_val;
                         Status.println("Found DT_STRSZ: " + strtab_size + " bytes");
                     } else if (d_tag == 0x1) { // DT_NEEDED
-                        if (strtab_addr != 0) {
-                            String library_name = new Pointer(strtab_addr + d_val).readString(new Integer(256));
-                            Status.println("DT_NEEDED found, library required: " + library_name);
-                            if (library_name != null && library_name.trim().length() > 0) { // Replace isEmpty() with length() > 0
-                                neededLibraries.put(library_name, Boolean.FALSE); // Mark as not loaded yet
-                            }
-                        } else {
-                            Status.println("DT_STRTAB not found, cannot resolve library name");
-                        }
+                        neededOffsets.add(new Long(d_val)); // Store the offset temporarily
+                        Status.println("DT_NEEDED found, offset stored: " + d_val);
                     }
                     dyn = dyn.inc(16); // Move to next entry (tag + value)
+                }
+
+                // Now that we have DT_STRTAB, resolve the library names
+                if (strtab_addr != 0 && !neededOffsets.isEmpty()) {
+                    Status.println("Resolving DT_NEEDED entries with strtab_addr=0x" + Long.toHexString(strtab_addr));
+                    for (Iterator iter = neededOffsets.iterator(); iter.hasNext(); ) {
+                        Long offset = (Long) iter.next();
+                        String library_name = new Pointer(strtab_addr + offset.longValue()).readString(new Integer(256));
+                        Status.println("Resolved DT_NEEDED library: " + library_name + " (offset=" + offset + ")");
+                        if (library_name != null && library_name.trim().length() > 0) {
+                            neededLibraries.put(library_name, Boolean.FALSE); // Mark as not loaded yet
+                        }
+                    }
+                } else if (strtab_addr == 0) {
+                    Status.println("DT_STRTAB not found, cannot resolve library names");
+                } else {
+                    Status.println("No DT_NEEDED entries found");
                 }
 
                 // Load all required libraries
@@ -549,6 +562,8 @@ public class Elfloader implements Runnable {
                     if (!allLoaded) {
                         Status.println("Warning: Some libraries failed to load, proceeding with partial functionality...");
                     }
+                } else {
+                    Status.println("No libraries to load");
                 }
             }
 
@@ -571,7 +586,7 @@ public class Elfloader implements Runnable {
                 Status.println("Processing " + rela_count + " RELA entries");
                 for (int j = 0; j < rela_count; j++) {
                     Pointer rela_addr = elf_addr.inc(sh_offset).inc(SIZE_RELA * j);
-                    long r_info = rela_addr.inc(OFF_RELA_INFO).read8();
+                    int r_info = rela_addr.inc(OFF_RELA_INFO).read4(); // Read as 32-bit for ELF64
                     Status.println("RELA " + j + ": info=" + r_info);
                     if (r_info == R_X86_64_RELATIVE) {
                         r_relative(base_addr, rela_addr);
@@ -628,8 +643,13 @@ public class Elfloader implements Runnable {
                 args[4] = 0;
                 args[5] = 0;
                 Status.println("Invoking entry point at " + entry_point + " with args: [" + args[0] + ", " + args[1] + ", " + args[2] + ", " + args[3] + ", " + args[4] + ", " + args[5] + "]");
-                libKernel.call(base_addr.inc(e_entry), args);
-                Status.println("Entry point invoked successfully. ELF execution completed");
+                try {
+                    libKernel.call(base_addr.inc(e_entry), args);
+                    Status.println("Entry point invoked successfully. ELF execution completed");
+                } catch (Exception e) {
+                    Status.println("Failed to invoke entry point: " + e.getMessage());
+                    throw new Exception("Entry point invocation failed", e);
+                }
             } else {
                 Status.println("Invalid base_addr, cannot invoke entry point");
                 throw new IOException("Invalid ELF file");
