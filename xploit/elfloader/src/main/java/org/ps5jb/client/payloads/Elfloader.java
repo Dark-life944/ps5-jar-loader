@@ -83,6 +83,12 @@ public class Elfloader implements Runnable {
     private byte[] elfData = null;
     private Map loadedLibraries = new HashMap(); // Raw type for Java 1.4 compatibility
 
+    // Added as fields to make them accessible in getSymbolNameFromDynamic
+    private long min_vaddr = -1;
+    private long max_vaddr = -1;
+    private Pointer base_addr = Pointer.NULL;
+    private long base_size = 0;
+
     private void init() throws Exception {
         Status.println("Starting init...");
         if (KernelReadWrite.getAccessor(getClass().getClassLoader()) instanceof KernelAccessorIPv6) {
@@ -293,8 +299,8 @@ public class Elfloader implements Runnable {
         long r_offset = rela_addr.inc(OFF_RELA_OFFSET).read8();
         long r_addend = rela_addr.inc(OFF_RELA_ADDEND).read8();
         Status.println("Applying relocation: offset=" + r_offset + ", addend=" + r_addend);
-        base_addr.inc(r_offset).write8(base_addr.addr() + r_addend);
-        Status.println("Relocation applied at " + base_addr.inc(r_offset).addr());
+        this.base_addr.inc(r_offset).write8(this.base_addr.addr() + r_addend);
+        Status.println("Relocation applied at " + this.base_addr.inc(r_offset).addr());
     }
 
     private void pt_load(Pointer elf_addr, Pointer base_addr, Pointer phdr_addr) throws Exception {
@@ -308,7 +314,7 @@ public class Elfloader implements Runnable {
             return;
         }
         long memsz = ROUND_PG(p_memsz);
-        Pointer addr = base_addr.inc(p_vaddr);
+        Pointer addr = this.base_addr.inc(p_vaddr);
         Status.println("Calling mmap: addr=" + addr.addr() + ", size=" + memsz);
         addr = libKernel.mmap(addr, memsz, PROT_READ | PROT_WRITE, MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
         Status.println("mmap returned: " + addr.addr());
@@ -334,7 +340,7 @@ public class Elfloader implements Runnable {
             return;
         }
         long memsz = ROUND_PG(p_memsz);
-        Pointer addr = base_addr.inc(p_vaddr);
+        Pointer addr = this.base_addr.inc(p_vaddr);
         Status.println("Calling mmap: addr=" + addr.addr() + ", size=" + memsz);
         addr = libKernel.mmap(addr, memsz, PROT_READ | PROT_WRITE, MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
         Status.println("mmap returned: " + addr.addr());
@@ -356,7 +362,7 @@ public class Elfloader implements Runnable {
         long p_memsz = phdr_addr.inc(OFF_PHDR_MEMSZ).read8();
         int p_flags = phdr_addr.inc(OFF_PHDR_FLAGS).read4();
         Status.println("pt_reload: offset=" + p_offset + ", vaddr=" + p_vaddr + ", memsz=" + p_memsz + ", flags=" + p_flags);
-        Pointer addr = base_addr.inc(p_vaddr);
+        Pointer addr = this.base_addr.inc(p_vaddr);
         long memsz = ROUND_PG(p_memsz);
         int prot = PFLAGS(p_flags);
         if ((p_flags & PF_X) == PF_X) prot |= PROT_EXEC;
@@ -420,10 +426,6 @@ public class Elfloader implements Runnable {
 
     public void runElf(byte[] elf_bytes, OutputStream os) throws Exception {
         Pointer elf_addr = Pointer.NULL;
-        Pointer base_addr = Pointer.NULL;
-        long base_size = 0;
-        long min_vaddr = -1;
-        long max_vaddr = -1;
         Pointer dynamic_section_addr = null; // To store the dynamic section address
         Status.println("Starting runElf with " + elf_bytes.length + " bytes");
         if (elf_bytes[0] != (byte) 0x7f || elf_bytes[1] != (byte) 0x45 || elf_bytes[2] != (byte) 0x4c || elf_bytes[3] != (byte) 0x46) {
@@ -456,28 +458,28 @@ public class Elfloader implements Runnable {
                 long p_vaddr = phdr_addr.inc(OFF_PHDR_VADDR).read8();
                 long p_memsz = phdr_addr.inc(OFF_PHDR_MEMSZ).read8();
                 Status.println("PHDR " + i + ": vaddr=" + p_vaddr + ", memsz=" + p_memsz);
-                if (p_vaddr < min_vaddr || min_vaddr == -1) min_vaddr = p_vaddr;
-                if (max_vaddr < p_vaddr + p_memsz) max_vaddr = p_vaddr + p_memsz;
+                if (p_vaddr < this.min_vaddr || this.min_vaddr == -1) this.min_vaddr = p_vaddr;
+                if (this.max_vaddr < p_vaddr + p_memsz) this.max_vaddr = p_vaddr + p_memsz;
             }
-            Status.println("Virtual memory region: min_vaddr=" + min_vaddr + ", max_vaddr=" + max_vaddr);
-            min_vaddr = TRUNC_PG(min_vaddr);
-            max_vaddr = ROUND_PG(max_vaddr);
-            base_size = max_vaddr - min_vaddr;
-            Status.println("Adjusted memory region: min_vaddr=" + min_vaddr + ", max_vaddr=" + max_vaddr + ", base_size=" + base_size);
+            Status.println("Virtual memory region: min_vaddr=" + this.min_vaddr + ", max_vaddr=" + this.max_vaddr);
+            this.min_vaddr = TRUNC_PG(this.min_vaddr);
+            this.max_vaddr = ROUND_PG(this.max_vaddr);
+            this.base_size = this.max_vaddr - this.min_vaddr;
+            Status.println("Adjusted memory region: min_vaddr=" + this.min_vaddr + ", max_vaddr=" + this.max_vaddr + ", base_size=" + this.base_size);
             int flags = MAP_PRIVATE | MAP_ANONYMOUS;
             if (e_type == ET_DYN) {
-                base_addr = Pointer.NULL;
+                this.base_addr = Pointer.NULL;
             } else if (e_type == ET_EXEC) {
-                base_addr = Pointer.valueOf(min_vaddr);
+                this.base_addr = Pointer.valueOf(this.min_vaddr);
                 flags |= MAP_FIXED;
             } else {
                 Status.println("Unsupported ELF type: " + e_type);
                 throw new IOException("Unsupported ELF file");
             }
-            Status.println("Reserving address space: base_addr=" + base_addr.addr() + ", size=" + base_size);
-            base_addr = libKernel.mmap(base_addr, base_size, PROT_NONE, flags, -1, 0);
-            Status.println("mmap returned: " + base_addr.addr());
-            if (base_addr.addr() == -1) {
+            Status.println("Reserving address space: base_addr=" + this.base_addr.addr() + ", size=" + this.base_size);
+            this.base_addr = libKernel.mmap(this.base_addr, this.base_size, PROT_NONE, flags, -1, 0);
+            Status.println("mmap returned: " + this.base_addr.addr());
+            if (this.base_addr.addr() == -1) {
                 Status.println("runElf: mmap failed with -1");
                 throw new Exception("runElf: mmap failed");
             }
@@ -488,12 +490,12 @@ public class Elfloader implements Runnable {
                 Status.println("PHDR " + i + " type=" + p_type);
                 if (p_type == PT_LOAD) {
                     Status.println("Processing PT_LOAD for PHDR " + i);
-                    pt_load(elf_addr, base_addr, phdr_addr);
+                    pt_load(elf_addr, this.base_addr, phdr_addr);
                     Status.println("PT_LOAD for PHDR " + i + " completed");
                 } else if (p_type == PT_DYNAMIC) {
                     Status.println("Processing PT_DYNAMIC for PHDR " + i);
-                    pt_dynamic(elf_addr, base_addr, phdr_addr);
-                    dynamic_section_addr = base_addr.inc(phdr_addr.inc(OFF_PHDR_VADDR).read8()); // Store dynamic section address
+                    pt_dynamic(elf_addr, this.base_addr, phdr_addr);
+                    dynamic_section_addr = this.base_addr.inc(phdr_addr.inc(OFF_PHDR_VADDR).read8()); // Store dynamic section address
                 }
             }
 
@@ -514,7 +516,7 @@ public class Elfloader implements Runnable {
                     Status.println("Dynamic entry: tag=0x" + Long.toHexString(d_tag) + ", value=0x" + Long.toHexString(d_val));
 
                     if (d_tag == 0x5) { // DT_STRTAB
-                        strtab_addr = base_addr.addr() + d_val; // Adjust to base address
+                        strtab_addr = this.base_addr.addr() + d_val; // Adjust to base address
                         Status.println("Found DT_STRTAB at: 0x" + Long.toHexString(strtab_addr));
                     } else if (d_tag == 0x6) { // DT_STRSZ
                         strtab_size = d_val;
@@ -573,7 +575,7 @@ public class Elfloader implements Runnable {
             }
 
             // Resolve dynamic symbols
-            resolveDynamicSymbols(base_addr);
+            resolveDynamicSymbols(this.base_addr);
 
             Status.println("Applying relocations...");
             for (int i = 0; i < e_shnum; i++) {
@@ -591,12 +593,12 @@ public class Elfloader implements Runnable {
                 Status.println("Processing " + rela_count + " RELA entries");
                 for (int j = 0; j < rela_count; j++) {
                     Pointer rela_addr = elf_addr.inc(sh_offset).inc(SIZE_RELA * j);
-                    long r_info = rela_addr.inc(OFF_RELA_INFO).read8(); // Read as 64-bit for ELF64, upper 32 bits for symbol index
+                    long r_info = rela_addr.inc(OFF_RELA_INFO).read8(); // Read as 64-bit for ELF64
                     Status.println("RELA " + j + ": info=0x" + Long.toHexString(r_info));
                     int r_type = (int) (r_info & 0xFFFFFFFFL); // Lower 32 bits for relocation type
                     int symbolIndex = (int) (r_info >> 32); // Upper 32 bits for symbol index
                     if (r_type == R_X86_64_RELATIVE) {
-                        r_relative(base_addr, rela_addr);
+                        r_relative(this.base_addr, rela_addr);
                         Status.println("R_X86_64_RELATIVE applied for RELA " + j);
                     } else if (r_type == R_X86_64_GLOB_DAT || r_type == R_X86_64_JUMP_SLOT) {
                         long r_offset = rela_addr.inc(OFF_RELA_OFFSET).read8();
@@ -616,7 +618,7 @@ public class Elfloader implements Runnable {
                                 }
                             }
                             if (symbolAddr != null && symbolAddr.addr() != 0) {
-                                base_addr.inc(r_offset).write8(symbolAddr.addr() + r_addend);
+                                this.base_addr.inc(r_offset).write8(symbolAddr.addr() + r_addend);
                                 Status.println("Applied relocation for symbol " + symbolName + " at offset " + r_offset);
                             } else {
                                 Status.println("Symbol " + symbolName + " not found in loaded libraries");
@@ -643,11 +645,11 @@ public class Elfloader implements Runnable {
                 }
                 if ((p_flags & PF_X) == PF_X) {
                     Status.println("Processing executable segment for PHDR " + i);
-                    pt_reload(base_addr, phdr_addr);
+                    pt_reload(this.base_addr, phdr_addr);
                     Status.println("Executable segment processed for PHDR " + i);
                     continue;
                 }
-                Pointer addr = base_addr.inc(p_vaddr);
+                Pointer addr = this.base_addr.inc(p_vaddr);
                 long memsz = ROUND_PG(p_memsz);
                 int prot = PFLAGS(p_flags);
                 Status.println("Calling mprotect: addr=" + addr.addr() + ", size=" + memsz + ", prot=" + prot);
@@ -657,8 +659,8 @@ public class Elfloader implements Runnable {
                 }
                 Status.println("mprotect succeeded for PHDR " + i);
             }
-            if (base_addr.addr() != -1) {
-                long entry_point = base_addr.inc(e_entry).addr();
+            if (this.base_addr.addr() != -1) {
+                long entry_point = this.base_addr.inc(e_entry).addr();
                 Status.println("Preparing to invoke entry point at " + entry_point + " with arg_addr=" + arg_addr.addr());
                 if (entry_point <= 0) {
                     Status.println("Invalid entry point address: " + entry_point);
@@ -677,7 +679,7 @@ public class Elfloader implements Runnable {
                 args[5] = 0;
                 Status.println("Invoking entry point at " + entry_point + " with args: [" + args[0] + ", " + args[1] + ", " + args[2] + ", " + args[3] + ", " + args[4] + ", " + args[5] + "]");
                 try {
-                    libKernel.call(base_addr.inc(e_entry), args);
+                    libKernel.call(this.base_addr.inc(e_entry), args);
                     Status.println("Entry point invoked successfully. ELF execution completed");
                 } catch (Exception e) {
                     Status.println("Failed to invoke entry point: " + e.getMessage());
@@ -693,9 +695,9 @@ public class Elfloader implements Runnable {
                 Status.println("Freeing elf_addr=" + elf_addr.addr());
                 elf_addr.free();
             }
-            if (base_addr.addr() != -1) {
-                Status.println("Unmapping base_addr=" + base_addr.addr() + ", size=" + base_size);
-                libKernel.munmap(base_addr, base_size);
+            if (this.base_addr.addr() != -1) {
+                Status.println("Unmapping base_addr=" + this.base_addr.addr() + ", size=" + this.base_size);
+                libKernel.munmap(this.base_addr, this.base_size);
             }
             Status.println("runElf cleanup completed");
         }
@@ -816,8 +818,8 @@ public class Elfloader implements Runnable {
         }
 
         // Step 2: Calculate the actual addresses in memory
-        Pointer dynsym_table = base_addr.inc(dynsym_addr - min_vaddr); // Adjust relative to base_addr
-        Pointer dynstr_table = base_addr.inc(dynstr_addr - min_vaddr); // Adjust relative to base_addr
+        Pointer dynsym_table = this.base_addr.inc(dynsym_addr - this.min_vaddr); // Adjust relative to base_addr
+        Pointer dynstr_table = this.base_addr.inc(dynstr_addr - this.min_vaddr); // Adjust relative to base_addr
 
         // Step 3: Read the symbol entry from .dynsym
         // ELF64_Sym structure: { st_name (4 bytes), st_info (1 byte), st_other (1 byte),
@@ -832,7 +834,7 @@ public class Elfloader implements Runnable {
         Pointer symbol_name_ptr = dynstr_table.inc(st_name_offset);
         String symbol_name = readString(symbol_name_ptr);
 
-        if (symbol_name == null || symbol_name.isEmpty()) {
+        if (symbol_name == null || symbol_name.length() == 0) { // Changed from isEmpty() to length() == 0
             Status.println("Failed to read symbol name at offset " + st_name_offset + " in .dynstr");
             return null;
         }
