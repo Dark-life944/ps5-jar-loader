@@ -12,6 +12,7 @@ import org.ps5jb.sdk.lib.LibKernel;
 
 import java.io.*;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.Map;
 
 public class Elfloader implements Runnable {
@@ -76,7 +77,7 @@ public class Elfloader implements Runnable {
     private SdkInit sdk;
     private LibKernel libKernel;
     private byte[] elfData = null;
-    private Map<String, Library> loadedLibraries = new HashMap<>(); // Track loaded libraries
+    private Map loadedLibraries = new HashMap(); // Raw type instead of generics
 
     private void init() throws Exception {
         Status.println("Starting init...");
@@ -120,7 +121,6 @@ public class Elfloader implements Runnable {
         }
     }
 
-    @Override
     public void run() {
         this.libKernel = new LibKernel();
         this.sdk = null;
@@ -244,7 +244,8 @@ public class Elfloader implements Runnable {
                 sdk.restoreNonAgcKernelReadWrite();
             }
             // Close all loaded libraries
-            for (Library lib : loadedLibraries.values()) {
+            for (Iterator iter = loadedLibraries.values().iterator(); iter.hasNext(); ) {
+                Library lib = (Library) iter.next();
                 lib.closeLibrary();
             }
             Status.println("Closing libKernel...");
@@ -508,7 +509,8 @@ public class Elfloader implements Runnable {
                         Status.println("Dynamic entry: tag=0x" + Long.toHexString(d_tag) + ", value=0x" + Long.toHexString(d_val));
 
                         if (d_tag == 1) { // DT_NEEDED
-                            String library_name = dynamic_section.inc(8).readString();
+                            // Read the string from the string table with a max length of 256 bytes
+                            String library_name = dynamic_section.inc(d_val).readString(new Integer(256));
                             Status.println("DT_NEEDED found, library required: " + library_name);
                             loadLibrary(library_name);
                         }
@@ -612,7 +614,6 @@ public class Elfloader implements Runnable {
         }
     }
 
-    // Updated method to load dynamic libraries using Library class
     private void loadLibrary(String libraryName) throws Exception {
         Status.println("Attempting to load library: " + libraryName);
         String libraryPath = "/system/common/lib/" + libraryName + ".sprx";
@@ -635,7 +636,8 @@ public class Elfloader implements Runnable {
                 "strcmp", "munmap", "memcpy", "strcpy", "strcat", "strerror", "memset",
                 "vsnprintf", "sceKernelSendNotificationRequest"
             };
-            for (String symbol : requiredSymbols) {
+            for (int i = 0; i < requiredSymbols.length; i++) {
+                String symbol = requiredSymbols[i];
                 try {
                     Pointer symbolAddr = lib.addrOf(symbol);
                     Status.println("Resolved symbol '" + symbol + "' at address: " + symbolAddr.addr());
@@ -648,7 +650,6 @@ public class Elfloader implements Runnable {
         }
     }
 
-    // New method to resolve dynamic symbols after loading libraries
     private void resolveDynamicSymbols(Pointer base_addr) throws Exception {
         Status.println("Resolving dynamic symbols...");
         if (loadedLibraries.isEmpty()) {
@@ -657,7 +658,7 @@ public class Elfloader implements Runnable {
         }
 
         // Map of libraries to their symbols (simplified mapping based on dependencies)
-        Map<String, String[]> librarySymbols = new HashMap<>();
+        Map librarySymbols = new HashMap();
         librarySymbols.put("libkernel_web.sprx", new String[]{
             "getpid", "kill", "waitpid", "munmap", "mprotect", "mmap", "dup"
         });
@@ -669,11 +670,16 @@ public class Elfloader implements Runnable {
             "sceKernelSendNotificationRequest"
         });
 
-        for (Map.Entry<String, Library> entry : loadedLibraries.entrySet()) {
-            String libName = entry.getKey();
-            Library lib = entry.getValue();
-            String[] symbols = librarySymbols.getOrDefault(libName, new String[]{});
-            for (String symbol : symbols) {
+        for (Iterator iter = loadedLibraries.entrySet().iterator(); iter.hasNext(); ) {
+            Map.Entry entry = (Map.Entry) iter.next();
+            String libName = (String) entry.getKey();
+            Library lib = (Library) entry.getValue();
+            String[] symbols = (String[]) librarySymbols.get(libName);
+            if (symbols == null) {
+                symbols = new String[0];
+            }
+            for (int i = 0; i < symbols.length; i++) {
+                String symbol = symbols[i];
                 try {
                     Pointer symbolAddr = lib.addrOf(symbol);
                     Status.println("Resolved symbol '" + symbol + "' from " + libName + " at: " + symbolAddr.addr());
