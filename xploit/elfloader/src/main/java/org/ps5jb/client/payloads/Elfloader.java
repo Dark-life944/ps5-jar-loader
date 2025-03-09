@@ -515,7 +515,7 @@ public class Elfloader implements Runnable {
                         if (strtab_addr != 0) {
                             String library_name = new Pointer(strtab_addr + d_val).readString(new Integer(256));
                             Status.println("DT_NEEDED found, library required: " + library_name);
-                            if (library_name != null && !library_name.trim().isEmpty()) {
+                            if (library_name != null && library_name.trim().length() > 0) { // Replace isEmpty() with length() > 0
                                 neededLibraries.put(library_name, Boolean.FALSE); // Mark as not loaded yet
                             }
                         } else {
