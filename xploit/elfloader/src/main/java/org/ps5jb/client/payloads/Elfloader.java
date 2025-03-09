@@ -77,7 +77,7 @@ public class Elfloader implements Runnable {
     private SdkInit sdk;
     private LibKernel libKernel;
     private byte[] elfData = null;
-    private Map loadedLibraries = new HashMap(); // Raw type instead of generics
+    private Map loadedLibraries = new HashMap(); // Raw type for Java 1.4 compatibility
 
     private void init() throws Exception {
         Status.println("Starting init...");
@@ -474,6 +474,7 @@ public class Elfloader implements Runnable {
                 throw new Exception("runElf: mmap failed");
             }
             Status.println("Parsing program headers...");
+            Pointer dynamic_section_addr = null; // To store the address of the dynamic section
             for (int i = 0; i < e_phnum; i++) {
                 Pointer phdr_addr = elf_addr.inc(e_phoff).inc(i * SIZE_PHDR);
                 int p_type = phdr_addr.inc(OFF_PHDR_TYPE).read4();
@@ -485,36 +486,68 @@ public class Elfloader implements Runnable {
                 } else if (p_type == PT_DYNAMIC) {
                     Status.println("Processing PT_DYNAMIC for PHDR " + i);
                     pt_dynamic(elf_addr, base_addr, phdr_addr);
+                    dynamic_section_addr = base_addr.inc(phdr_addr.inc(OFF_PHDR_VADDR).read8()); // Store the dynamic section address
                 }
             }
 
             // Handle dynamic linking using Library class
             Status.println("Checking for dynamic linking sections...");
-            for (int i = 0; i < e_phnum; i++) {
-                Pointer phdr_addr = elf_addr.inc(e_phoff).inc(i * SIZE_PHDR);
-                int p_type = phdr_addr.inc(OFF_PHDR_TYPE).read4();
-                if (p_type == PT_DYNAMIC) {
-                    Status.println("Found PT_DYNAMIC section at PHDR " + i);
-                    long p_offset = phdr_addr.inc(OFF_PHDR_OFFSET).read8();
-                    long p_vaddr = phdr_addr.inc(OFF_PHDR_VADDR).read8();
-                    long p_filesz = phdr_addr.inc(OFF_PHDR_FILESZ).read8();
-                    Pointer dynamic_section = base_addr.inc(p_vaddr);
-                    Status.println("Dynamic section loaded at " + dynamic_section.addr() + ", size=" + p_filesz);
+            if (dynamic_section_addr != null) {
+                Status.println("Dynamic section loaded at " + dynamic_section_addr.addr());
+                Pointer dyn = dynamic_section_addr;
+                long strtab_addr = 0; // Address of .dynstr
+                long strtab_size = 0; // Size of .dynstr
+                Map neededLibraries = new HashMap(); // Store all required libraries
 
-                    // Process dynamic entries
-                    long dynamic_entry = 0;
-                    while ((dynamic_entry = dynamic_section.read8()) != 0) {
-                        int d_tag = (int) (dynamic_entry & 0xFFFFFFFFL); // Lower 32 bits for tag
-                        long d_val = dynamic_section.inc(8).read8(); // Value or pointer
-                        Status.println("Dynamic entry: tag=0x" + Long.toHexString(d_tag) + ", value=0x" + Long.toHexString(d_val));
+                // Parse dynamic section to find DT_STRTAB, DT_STRSZ, and DT_NEEDED
+                while (dyn.read8() != 0) {
+                    long d_tag = dyn.read8();
+                    long d_val = dyn.inc(8).read8();
+                    Status.println("Dynamic entry: tag=0x" + Long.toHexString(d_tag) + ", value=0x" + Long.toHexString(d_val));
 
-                        if (d_tag == 1) { // DT_NEEDED
-                            // Read the string from the string table with a max length of 256 bytes
-                            String library_name = dynamic_section.inc(d_val).readString(new Integer(256));
+                    if (d_tag == 0x5) { // DT_STRTAB
+                        strtab_addr = base_addr.addr() + d_val; // Adjust to base address
+                        Status.println("Found DT_STRTAB at: 0x" + Long.toHexString(strtab_addr));
+                    } else if (d_tag == 0x6) { // DT_STRSZ
+                        strtab_size = d_val;
+                        Status.println("Found DT_STRSZ: " + strtab_size + " bytes");
+                    } else if (d_tag == 0x1) { // DT_NEEDED
+                        if (strtab_addr != 0) {
+                            String library_name = new Pointer(strtab_addr + d_val).readString(new Integer(256));
                             Status.println("DT_NEEDED found, library required: " + library_name);
-                            loadLibrary(library_name);
+                            if (library_name != null && !library_name.trim().isEmpty()) {
+                                neededLibraries.put(library_name, Boolean.FALSE); // Mark as not loaded yet
+                            }
+                        } else {
+                            Status.println("DT_STRTAB not found, cannot resolve library name");
                         }
-                        dynamic_section = dynamic_section.inc(16); // Move to next entry (tag + value)
+                    }
+                    dyn = dyn.inc(16); // Move to next entry (tag + value)
+                }
+
+                // Load all required libraries
+                if (!neededLibraries.isEmpty()) {
+                    Status.println("Found " + neededLibraries.size() + " required libraries, attempting to load...");
+                    for (Iterator iter = neededLibraries.keySet().iterator(); iter.hasNext(); ) {
+                        String library_name = (String) iter.next();
+                        try {
+                            loadLibrary(library_name);
+                            neededLibraries.put(library_name, Boolean.TRUE); // Mark as loaded
+                            Status.println("Successfully loaded library: " + library_name);
+                        } catch (Exception e) {
+                            Status.println("Failed to load library '" + library_name + "': " + e.getMessage() + ", continuing with others...");
+                        }
+                    }
+                    // Check if all libraries loaded successfully
+                    boolean allLoaded = true;
+                    for (Iterator iter = neededLibraries.values().iterator(); iter.hasNext(); ) {
+                        if (!((Boolean) iter.next()).booleanValue()) {
+                            allLoaded = false;
+                            break;
+                        }
+                    }
+                    if (!allLoaded) {
+                        Status.println("Warning: Some libraries failed to load, proceeding with partial functionality...");
                     }
                 }
             }
