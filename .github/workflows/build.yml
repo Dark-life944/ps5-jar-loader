@@ -3,10 +3,10 @@ name: Build PS5 JAR Loader
 on:
   push:
     branches:
-      - main
+      - beta-test
   pull_request:
     branches:
-      - main
+      - beta-test
   workflow_dispatch:
 
 jobs:
