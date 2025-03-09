@@ -54,6 +54,8 @@ public class Elfloader implements Runnable {
     private static final int SHT_RELA = 4;
 
     private static final int R_X86_64_RELATIVE = 8;
+    private static final int R_X86_64_GLOB_DAT = 6; // Added for relocation support
+    private static final int R_X86_64_JUMP_SLOT = 7; // Added for relocation support
 
     private static final int PF_X = 0x1;
     private static final int PF_W = 0x2;
@@ -186,6 +188,9 @@ public class Elfloader implements Runnable {
                 utokenFlags.write1((byte) ((utokenVal | 0x01) & 0xFF));
                 Status.println("New kernel values:");
                 printFlags();
+
+                // Add libKernel to loadedLibraries
+                loadedLibraries.put("libKernel", libKernel);
             } finally {
                 if (sdk != null) {
                     Status.println("Restoring non-AGC kernel r/w...");
@@ -419,6 +424,7 @@ public class Elfloader implements Runnable {
         long base_size = 0;
         long min_vaddr = -1;
         long max_vaddr = -1;
+        Pointer dynamic_section_addr = null; // To store the dynamic section address
         Status.println("Starting runElf with " + elf_bytes.length + " bytes");
         if (elf_bytes[0] != (byte) 0x7f || elf_bytes[1] != (byte) 0x45 || elf_bytes[2] != (byte) 0x4c || elf_bytes[3] != (byte) 0x46) {
             Status.println("ELF magic number invalid");
@@ -476,7 +482,6 @@ public class Elfloader implements Runnable {
                 throw new Exception("runElf: mmap failed");
             }
             Status.println("Parsing program headers...");
-            Pointer dynamic_section_addr = null; // To store the address of the dynamic section
             for (int i = 0; i < e_phnum; i++) {
                 Pointer phdr_addr = elf_addr.inc(e_phoff).inc(i * SIZE_PHDR);
                 int p_type = phdr_addr.inc(OFF_PHDR_TYPE).read4();
@@ -488,7 +493,7 @@ public class Elfloader implements Runnable {
                 } else if (p_type == PT_DYNAMIC) {
                     Status.println("Processing PT_DYNAMIC for PHDR " + i);
                     pt_dynamic(elf_addr, base_addr, phdr_addr);
-                    dynamic_section_addr = base_addr.inc(phdr_addr.inc(OFF_PHDR_VADDR).read8()); // Store the dynamic section address
+                    dynamic_section_addr = base_addr.inc(phdr_addr.inc(OFF_PHDR_VADDR).read8()); // Store dynamic section address
                 }
             }
 
@@ -586,13 +591,41 @@ public class Elfloader implements Runnable {
                 Status.println("Processing " + rela_count + " RELA entries");
                 for (int j = 0; j < rela_count; j++) {
                     Pointer rela_addr = elf_addr.inc(sh_offset).inc(SIZE_RELA * j);
-                    int r_info = rela_addr.inc(OFF_RELA_INFO).read4(); // Read as 32-bit for ELF64
-                    Status.println("RELA " + j + ": info=" + r_info);
-                    if (r_info == R_X86_64_RELATIVE) {
+                    long r_info = rela_addr.inc(OFF_RELA_INFO).read8(); // Read as 64-bit for ELF64, upper 32 bits for symbol index
+                    Status.println("RELA " + j + ": info=0x" + Long.toHexString(r_info));
+                    int r_type = (int) (r_info & 0xFFFFFFFFL); // Lower 32 bits for relocation type
+                    int symbolIndex = (int) (r_info >> 32); // Upper 32 bits for symbol index
+                    if (r_type == R_X86_64_RELATIVE) {
                         r_relative(base_addr, rela_addr);
                         Status.println("R_X86_64_RELATIVE applied for RELA " + j);
+                    } else if (r_type == R_X86_64_GLOB_DAT || r_type == R_X86_64_JUMP_SLOT) {
+                        long r_offset = rela_addr.inc(OFF_RELA_OFFSET).read8();
+                        long r_addend = rela_addr.inc(OFF_RELA_ADDEND).read8();
+                        String symbolName = getSymbolNameFromDynamic(elf_addr, dynamic_section_addr, symbolIndex);
+                        if (symbolName != null) {
+                            Pointer symbolAddr = null;
+                            for (Iterator iter = loadedLibraries.values().iterator(); iter.hasNext(); ) {
+                                Library lib = (Library) iter.next();
+                                try {
+                                    symbolAddr = lib.addrOf(symbolName);
+                                    if (symbolAddr != null && symbolAddr.addr() != 0) {
+                                        break;
+                                    }
+                                } catch (Exception e) {
+                                    continue;
+                                }
+                            }
+                            if (symbolAddr != null && symbolAddr.addr() != 0) {
+                                base_addr.inc(r_offset).write8(symbolAddr.addr() + r_addend);
+                                Status.println("Applied relocation for symbol " + symbolName + " at offset " + r_offset);
+                            } else {
+                                Status.println("Symbol " + symbolName + " not found in loaded libraries");
+                            }
+                        } else {
+                            Status.println("Could not resolve symbol name for relocation at offset " + r_offset);
+                        }
                     } else {
-                        Status.println("Unsupported relocation type: " + r_info + ", skipping");
+                        Status.println("Unsupported relocation type: " + r_type + ", skipping");
                     }
                 }
             }
@@ -650,6 +683,7 @@ public class Elfloader implements Runnable {
                     Status.println("Failed to invoke entry point: " + e.getMessage());
                     throw new Exception("Entry point invocation failed", e);
                 }
+                Status.println("Post-call check: Execution reached this point");
             } else {
                 Status.println("Invalid base_addr, cannot invoke entry point");
                 throw new IOException("Invalid ELF file");
@@ -694,7 +728,7 @@ public class Elfloader implements Runnable {
             return;
         }
 
-        // Map of libraries to their symbols (simplified mapping based on dependencies)
+        // Map of libraries to their symbols (updated to include libKernel and sceKernelSendNotificationRequest)
         Map librarySymbols = new HashMap();
         librarySymbols.put("libkernel_web.sprx", new String[]{
             "getpid", "kill", "waitpid", "munmap", "mprotect", "mmap", "dup"
@@ -703,8 +737,9 @@ public class Elfloader implements Runnable {
             "malloc", "free", "strlen", "strcmp", "memcpy", "strcpy", "strcat",
             "strerror", "memset", "vsnprintf"
         });
-        librarySymbols.put("libSceNet.sprx", new String[]{
-            "sceKernelSendNotificationRequest"
+        librarySymbols.put("libSceNet.sprx", new String[]{}); // Removed sceKernelSendNotificationRequest
+        librarySymbols.put("libKernel", new String[]{
+            "sceKernelSendNotificationRequest" // Added to libKernel
         });
 
         for (Iterator iter = loadedLibraries.entrySet().iterator(); iter.hasNext(); ) {
@@ -720,13 +755,102 @@ public class Elfloader implements Runnable {
                 try {
                     Pointer symbolAddr = lib.addrOf(symbol);
                     Status.println("Resolved symbol '" + symbol + "' from " + libName + " at: " + symbolAddr.addr());
-                    // Optionally update GOT/PLT entries if needed (requires relocation table parsing)
+                    // Test sceKernelSendNotificationRequest if resolved from libKernel
+                    if (libName.equals("libKernel") && symbol.equals("sceKernelSendNotificationRequest")) {
+                        Status.println("Testing sceKernelSendNotificationRequest using LibKernel method...");
+                        // Use the LibKernel method directly
+                        int result = libKernel.sceKernelSendNotificationRequest("Test Notification from Elfloader");
+                        if (result == 0) {
+                            Status.println("sceKernelSendNotificationRequest test succeeded (returned 0). Notification should appear on UI.");
+                        } else {
+                            Status.println("sceKernelSendNotificationRequest test failed (returned " + result + ").");
+                        }
+                    }
                 } catch (Exception e) {
                     Status.println("Failed to resolve symbol '" + symbol + "' from " + libName + ": " + e.getMessage());
                 }
             }
         }
         Status.println("Dynamic symbol resolution completed");
+    }
+
+    private String getSymbolNameFromDynamic(Pointer elf_addr, Pointer dynamic_section_addr, int symbolIndex) throws Exception {
+        Status.println("Resolving symbol name for index: " + symbolIndex);
+
+        // Step 1: Read the .dynamic section to find DT_SYMTAB and DT_STRTAB addresses
+        long dynsym_addr = 0; // Address of .dynsym table
+        long dynstr_addr = 0; // Address of .dynstr table
+
+        // ELF64_Dyn structure: { d_tag (8 bytes), d_val/d_ptr (8 bytes) }
+        final int SIZEOF_DYN = 16;
+        final int OFF_D_TAG = 0;  // Offset of d_tag in Elf64_Dyn
+        final int OFF_D_VAL = 8;  // Offset of d_val/d_ptr in Elf64_Dyn
+
+        // Dynamic tags
+        final long DT_SYMTAB = 4;  // Tag for .dynsym table address
+        final long DT_STRTAB = 5;  // Tag for .dynstr table address
+        final long DT_NULL = 0;    // End of .dynamic section
+
+        // Iterate over the .dynamic section entries
+        for (int i = 0; ; i++) {
+            Pointer dyn_entry = dynamic_section_addr.inc(i * SIZEOF_DYN);
+            long d_tag = dyn_entry.inc(OFF_D_TAG).read8();
+            long d_val = dyn_entry.inc(OFF_D_VAL).read8();
+
+            if (d_tag == DT_NULL) {
+                break; // End of .dynamic section
+            }
+
+            if (d_tag == DT_SYMTAB) {
+                dynsym_addr = d_val;
+                Status.println("Found DT_SYMTAB: .dynsym address = 0x" + Long.toHexString(dynsym_addr));
+            } else if (d_tag == DT_STRTAB) {
+                dynstr_addr = d_val;
+                Status.println("Found DT_STRTAB: .dynstr address = 0x" + Long.toHexString(dynstr_addr));
+            }
+        }
+
+        if (dynsym_addr == 0 || dynstr_addr == 0) {
+            Status.println("Failed to find .dynsym or .dynstr addresses in .dynamic section");
+            return null;
+        }
+
+        // Step 2: Calculate the actual addresses in memory
+        Pointer dynsym_table = base_addr.inc(dynsym_addr - min_vaddr); // Adjust relative to base_addr
+        Pointer dynstr_table = base_addr.inc(dynstr_addr - min_vaddr); // Adjust relative to base_addr
+
+        // Step 3: Read the symbol entry from .dynsym
+        // ELF64_Sym structure: { st_name (4 bytes), st_info (1 byte), st_other (1 byte),
+        // st_shndx (2 bytes), st_value (8 bytes), st_size (8 bytes) }
+        final int SIZEOF_SYM = 24;
+        final int OFF_ST_NAME = 0;  // Offset of st_name in Elf64_Sym
+
+        Pointer symbol_entry = dynsym_table.inc(symbolIndex * SIZEOF_SYM);
+        int st_name_offset = symbol_entry.inc(OFF_ST_NAME).read4(); // st_name is a 32-bit offset into .dynstr
+
+        // Step 4: Read the symbol name from .dynstr
+        Pointer symbol_name_ptr = dynstr_table.inc(st_name_offset);
+        String symbol_name = readString(symbol_name_ptr);
+
+        if (symbol_name == null || symbol_name.isEmpty()) {
+            Status.println("Failed to read symbol name at offset " + st_name_offset + " in .dynstr");
+            return null;
+        }
+
+        Status.println("Resolved symbol name: " + symbol_name + " for index " + symbolIndex);
+        return symbol_name;
+    }
+
+    private String readString(Pointer ptr) throws Exception {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 256; i++) { // Limit to 256 characters to avoid infinite loops
+            byte b = ptr.inc(i).read1();
+            if (b == 0) {
+                break; // Null terminator
+            }
+            sb.append((char) b);
+        }
+        return sb.toString();
     }
 
     private void printFlags() {
