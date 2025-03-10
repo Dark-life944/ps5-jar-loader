@@ -574,7 +574,39 @@ public class Elfloader implements Runnable {
                 }
             }
 
-            // Resolve dynamic symbols
+            // Resolve dynamic symbols and compare addresses with sceKernelDlsym
+            Status.println("Resolving dynamic symbols and comparing addresses with sceKernelDlsym...");
+            if (loadedLibraries.isEmpty()) {
+                Status.println("No libraries loaded, skipping symbol resolution");
+            } else {
+                // Test sceKernelDlsym for a specific symbol (e.g., "getpid")
+                String testSymbol = "getpid"; // Example symbol to test, can be changed to any symbol
+                for (Iterator iter = loadedLibraries.entrySet().iterator(); iter.hasNext(); ) {
+                    Map.Entry entry = (Map.Entry) iter.next();
+                    String libName = (String) entry.getKey();
+                    Library lib = (Library) entry.getValue();
+                    try {
+                        Pointer symbolAddr = lib.addrOf(testSymbol);
+                        if (symbolAddr != null && symbolAddr.addr() != 0) {
+                            Status.println("Resolved symbol '" + testSymbol + "' from " + libName + " at: 0x" + Long.toHexString(symbolAddr.addr()));
+                            // Compare with sceKernelDlsym directly in Java
+                            Pointer dlsymAddr = libKernel.addrOf(testSymbol);
+                            Status.println("sceKernelDlsym address for '" + testSymbol + "' in Java: 0x" + Long.toHexString(dlsymAddr.addr()));
+                            if (symbolAddr.addr() == dlsymAddr.addr()) {
+                                Status.println("Addresses match! No discrepancy found.");
+                            } else {
+                                Status.println("Addresses do NOT match! Potential issue with symbol resolution or ASLR.");
+                            }
+                        } else {
+                            Status.println("Failed to resolve symbol '" + testSymbol + "' from " + libName + ": Address is null or 0");
+                        }
+                    } catch (Exception e) {
+                        Status.println("Failed to resolve symbol '" + testSymbol + "' from " + libName + ": " + e.getMessage());
+                    }
+                }
+            }
+
+            // Resolve dynamic symbols (original method)
             resolveDynamicSymbols(this.base_addr);
 
             Status.println("Applying relocations...");
@@ -821,6 +853,8 @@ public class Elfloader implements Runnable {
         // For ET_DYN, dynsym_addr and dynstr_addr are offsets relative to base_addr, no need to subtract min_vaddr
         Pointer dynsym_table = this.base_addr.inc(dynsym_addr); // Direct offset from base_addr
         Pointer dynstr_table = this.base_addr.inc(dynstr_addr); // Direct offset from base_addr
+        Status.println("dynsym_table address: 0x" + Long.toHexString(dynsym_table.addr()));
+        Status.println("dynstr_table address: 0x" + Long.toHexString(dynstr_table.addr()));
 
         try {
             // Step 3: Read the symbol entry from .dynsym
@@ -831,6 +865,7 @@ public class Elfloader implements Runnable {
 
             Pointer symbol_entry = dynsym_table.inc(symbolIndex * SIZEOF_SYM);
             int st_name_offset = symbol_entry.inc(OFF_ST_NAME).read4(); // st_name is a 32-bit offset into .dynstr
+            Status.println("st_name_offset for symbol index " + symbolIndex + ": " + st_name_offset);
 
             // Step 4: Read the symbol name from .dynstr
             Pointer symbol_name_ptr = dynstr_table.inc(st_name_offset);
