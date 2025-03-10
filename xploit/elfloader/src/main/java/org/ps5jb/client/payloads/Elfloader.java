@@ -818,33 +818,39 @@ public class Elfloader implements Runnable {
         }
 
         // Step 2: Calculate the actual addresses in memory
-        Pointer dynsym_table = this.base_addr.inc(dynsym_addr - this.min_vaddr); // Adjust relative to base_addr
-        Pointer dynstr_table = this.base_addr.inc(dynstr_addr - this.min_vaddr); // Adjust relative to base_addr
+        // For ET_DYN, dynsym_addr and dynstr_addr are offsets relative to base_addr, no need to subtract min_vaddr
+        Pointer dynsym_table = this.base_addr.inc(dynsym_addr); // Direct offset from base_addr
+        Pointer dynstr_table = this.base_addr.inc(dynstr_addr); // Direct offset from base_addr
 
-        // Step 3: Read the symbol entry from .dynsym
-        // ELF64_Sym structure: { st_name (4 bytes), st_info (1 byte), st_other (1 byte),
-        // st_shndx (2 bytes), st_value (8 bytes), st_size (8 bytes) }
-        final int SIZEOF_SYM = 24;
-        final int OFF_ST_NAME = 0;  // Offset of st_name in Elf64_Sym
+        try {
+            // Step 3: Read the symbol entry from .dynsym
+            // ELF64_Sym structure: { st_name (4 bytes), st_info (1 byte), st_other (1 byte),
+            // st_shndx (2 bytes), st_value (8 bytes), st_size (8 bytes) }
+            final int SIZEOF_SYM = 24;
+            final int OFF_ST_NAME = 0;  // Offset of st_name in Elf64_Sym
 
-        Pointer symbol_entry = dynsym_table.inc(symbolIndex * SIZEOF_SYM);
-        int st_name_offset = symbol_entry.inc(OFF_ST_NAME).read4(); // st_name is a 32-bit offset into .dynstr
+            Pointer symbol_entry = dynsym_table.inc(symbolIndex * SIZEOF_SYM);
+            int st_name_offset = symbol_entry.inc(OFF_ST_NAME).read4(); // st_name is a 32-bit offset into .dynstr
 
-        // Step 4: Read the symbol name from .dynstr
-        Pointer symbol_name_ptr = dynstr_table.inc(st_name_offset);
-        String symbol_name = readString(symbol_name_ptr);
+            // Step 4: Read the symbol name from .dynstr
+            Pointer symbol_name_ptr = dynstr_table.inc(st_name_offset);
+            String symbol_name = readString(symbol_name_ptr);
 
-        if (symbol_name == null || symbol_name.length() == 0) { // Changed from isEmpty() to length() == 0
-            Status.println("Failed to read symbol name at offset " + st_name_offset + " in .dynstr");
+            if (symbol_name == null || symbol_name.length() == 0) { // Changed from isEmpty() to length() == 0
+                Status.println("Failed to read symbol name at offset " + st_name_offset + " in .dynstr");
+                return null;
+            }
+
+            Status.println("Resolved symbol name: " + symbol_name + " for index " + symbolIndex);
+            return symbol_name;
+        } catch (Exception e) {
+            Status.println("Error resolving symbol name for index " + symbolIndex + ": " + e.getMessage());
             return null;
         }
-
-        Status.println("Resolved symbol name: " + symbol_name + " for index " + symbolIndex);
-        return symbol_name;
     }
 
     private String readString(Pointer ptr) throws Exception {
-        StringBuilder sb = new StringBuilder();
+        StringBuffer sb = new StringBuffer(); // Changed from StringBuilder to StringBuffer
         for (int i = 0; i < 256; i++) { // Limit to 256 characters to avoid infinite loops
             byte b = ptr.inc(i).read1();
             if (b == 0) {
