@@ -439,7 +439,6 @@ public class Elfloader implements Runnable {
                         if (library_name != null && library_name.trim().length() > 0) {
                             if (library_name.equals("libkernel_web.sprx")) {
                                 neededLibraries.put(library_name, Boolean.FALSE);
-                            } else {
                             }
                         }
                     }
@@ -462,7 +461,6 @@ public class Elfloader implements Runnable {
                         }
                     }
                 }
-            } else {
             }
 
             for (int i = 0; i < e_shnum; i++) {
