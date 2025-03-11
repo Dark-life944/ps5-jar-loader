@@ -769,12 +769,10 @@ public class Elfloader implements Runnable {
         });
         librarySymbols.put("libSceLibcInternal.sprx", new String[]{
             "malloc", "free", "strlen", "strcmp", "memcpy", "strcpy", "strcat",
-            "strerror", "memset", "vsnprintf"
+            "strerror", "memset", "vsnprintf", "sceKernelSendNotificationRequest"
         });
         librarySymbols.put("libSceNet.sprx", new String[]{}); // Removed sceKernelSendNotificationRequest
-        librarySymbols.put("libKernel", new String[]{
-            "sceKernelSendNotificationRequest" // Added to libKernel
-        });
+        librarySymbols.put("libKernel", new String[]{});// for future things 
 
         for (Iterator iter = loadedLibraries.entrySet().iterator(); iter.hasNext(); ) {
             Map.Entry entry = (Map.Entry) iter.next();
