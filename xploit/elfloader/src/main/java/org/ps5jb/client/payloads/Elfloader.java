@@ -765,12 +765,11 @@ public class Elfloader implements Runnable {
         // Map of libraries to their symbols (updated to include libKernel and sceKernelSendNotificationRequest)
         Map librarySymbols = new HashMap();
         librarySymbols.put("libkernel_web.sprx", new String[]{
-            "getpid", "kill", "waitpid", "munmap", "mprotect", "mmap", "dup"
+            "getpid", "kill", "waitpid", "munmap", "mprotect", "mmap", "dup", "sceKernelSendNotificationRequest"
         });
         librarySymbols.put("libSceLibcInternal.sprx", new String[]{
             "malloc", "free", "strlen", "strcmp", "memcpy", "strcpy", "strcat",
-            "strerror", "memset", "vsnprintf", "sceKernelSendNotificationRequest"
-        });
+            "strerror", "memset", "vsnprintf" });
         librarySymbols.put("libSceNet.sprx", new String[]{}); // Removed sceKernelSendNotificationRequest
         librarySymbols.put("libKernel", new String[]{});// for future things 
 
